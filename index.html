@@ -1,0 +1,479 @@
+<!--
+Filename: chess-game-fixed.html
+Description: Complete single-file chess web app focused on
+- Readable text on dark background (light text colors)
+- Simulated online play (works across tabs on same browser via BroadcastChannel)
+- Random-match within 2 minutes (120s) or fallback to AI
+- Friend list, friend requests, chat, and presence
+- Move-sending between matched players
+
+Notes:
+- This file simulates online features using BroadcastChannel (works only for pages/tabs from same origin).
+- For real cross-device online play, integrate with a server (Socket.IO). A commented snippet near the bottom explains how to do that.
+- The chessboard here is a minimal clickable board that allows selecting and moving pieces (no rule-enforcement). Hooks are provided for integrating a full chess engine.
+- Save as an .html file and open in multiple tabs to test online features.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chess Game — Fixed (Ayesha)</title>
+<style>
+  :root{
+    --bg:#0b0f13; /* dark background */
+    --panel:#0f1720;
+    --muted:#cbd5e1;
+    --accent:#7dd3fc;
+    --card:#0b1220;
+    --danger:#fb7185;
+    --success:#34d399;
+    --board-light:#e6e6e6;
+    --board-dark:#1f2937;
+    --white-piece:#ffffff;
+    --black-piece:#111827;
+  }
+  *{box-sizing:border-box;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#07101a);color:var(--muted)}
+  header{display:flex;gap:20px;align-items:center;padding:16px 20px}
+  h1{margin:0;color:var(--accent);font-size:20px}
+  .container{display:grid;grid-template-columns:360px 1fr 320px;gap:18px;padding:12px}
+  .card{background:linear-gradient(180deg,var(--card),var(--panel));padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+
+  /* Left column */
+  .left{display:flex;flex-direction:column;gap:12px}
+  .status{display:flex;justify-content:space-between;align-items:center}
+  .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;color:var(--muted);cursor:pointer}
+  .btn.primary{background:linear-gradient(90deg,var(--accent),#60a5fa);color:#061018;border:none}
+  .small{font-size:13px;color:#9aa7b6}
+
+  /* Board area */
+  .board-wrap{display:flex;justify-content:center;align-items:center}
+  .board{width:520px;height:520px;border-radius:8px;overflow:hidden;border:2px solid rgba(255,255,255,0.04);display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr)}
+  .square{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none}
+  .square.light{background:var(--board-light)}
+  .square.dark{background:var(--board-dark);color:#eee}
+  .piece{font-size:30px;cursor:pointer}
+  .square.highlight{outline:4px solid rgba(125,211,252,0.18)}
+
+  /* right column */
+  .right{display:flex;flex-direction:column;gap:12px}
+  .list{max-height:280px;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+  .friend{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
+  .presence-dot{width:10px;height:10px;border-radius:50%}
+  .presence-online{background:var(--success)}
+  .presence-off{background:#475569}
+  .chat-box{height:220px;overflow:auto;padding:8px;background:linear-gradient(180deg,#07102110,#07102120);border-radius:8px}
+  .chat-input{display:flex;gap:8px;margin-top:8px}
+  input,textarea,select{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--muted);outline:none}
+  label{font-size:13px;color:#9aa7b6}
+
+  footer{padding:12px 20px;color:#8b98a6;font-size:13px}
+
+  /* responsive */
+  @media(max-width:1100px){.container{grid-template-columns:1fr}} 
+</style>
+</head>
+<body>
+<header>
+  <h1>Chess — Multiplayer (Fixed)</h1>
+  <div class="small">Readable text + 2-minute random matchmaking + friend/chat (same-origin simulation)</div>
+</header>
+<div class="container">
+  <div class="left card">
+    <div class="status">
+      <div>
+        <div class="small">You:</div>
+        <div id="myName" style="font-weight:700;color:var(--muted)"></div>
+      </div>
+      <div style="text-align:right">
+        <div class="small">Status</div>
+        <div id="presence" style="font-weight:700;color:var(--muted)">Offline</div>
+      </div>
+    </div>
+
+    <div style="margin-top:8px">
+      <label>Display name</label>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <input id="nameInput" placeholder="type your name" />
+        <button id="saveName" class="btn primary">Save</button>
+      </div>
+    </div>
+
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+      <button id="btnRandom" class="btn">Random Match (2 min)</button>
+      <button id="btnFriendInvite" class="btn">Invite Friend</button>
+    </div>
+
+    <div style="margin-top:10px">
+      <label>Game options</label>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <select id="moveMode">
+          <option value="click">Click move (select -> click dest)</option>
+          <option value="step">Step-by-step (highlight each move)</option>
+        </select>
+        <input id="timerPerMove" type="number" min="10" value="60" style="width:120px" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="display:flex;flex-direction:column;gap:12px;align-items:center">
+    <div style="display:flex;gap:12px;width:100%;justify-content:center;align-items:center">
+      <div class="small">Match status: <span id="matchInfo">Not matched</span></div>
+      <div class="small">Turn: <span id="turnInfo">—</span></div>
+    </div>
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+    </div>
+    <div style="width:100%;display:flex;gap:8px;justify-content:center">
+      <button id="resetBtn" class="btn">Reset Board</button>
+      <button id="giveUp" class="btn">Give Up</button>
+    </div>
+  </div>
+
+  <div class="right card">
+    <div>
+      <label>Friends / People</label>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="friendNameInput" placeholder="friend name" />
+        <button id="addFriendBtn" class="btn">Add</button>
+      </div>
+      <div class="list" id="peopleList"></div>
+    </div>
+
+    <div>
+      <label>Chat</label>
+      <div class="chat-box" id="chatBox"></div>
+      <div class="chat-input">
+        <input id="chatText" placeholder="type message" />
+        <button id="chatSend" class="btn primary">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<footer class="card" style="margin:12px">Tip: open this file in another tab (same browser) and set a different name to simulate online players. Random matching will pair available players within 120 seconds or fall back to an AI opponent.</footer>
+
+<script>
+// ==================== Basic app state ====================
+const myId = crypto.randomUUID();
+let myName = localStorage.getItem('cg_name') || 'Player-' + myId.slice(0,4);
+let presenceChannel = new BroadcastChannel('chess_presence_channel_v1');
+let chatChannel = new BroadcastChannel('chess_chat_channel_v1');
+let matchChannel = new BroadcastChannel('chess_match_channel_v1');
+let people = {}; // id -> {name, online, lastSeen, id}
+let matchedWith = null;
+let matchStartTime = null;
+let waitingForMatch = false;
+let randomMatchTimer = null;
+let matchTimeoutMs = 120000; // 2 minutes
+
+// UI refs
+const myNameEl = document.getElementById('myName');
+const presenceEl = document.getElementById('presence');
+const nameInput = document.getElementById('nameInput');
+const saveNameBtn = document.getElementById('saveName');
+const btnRandom = document.getElementById('btnRandom');
+const peopleList = document.getElementById('peopleList');
+const chatBox = document.getElementById('chatBox');
+const chatText = document.getElementById('chatText');
+const chatSend = document.getElementById('chatSend');
+const addFriendBtn = document.getElementById('addFriendBtn');
+const friendNameInput = document.getElementById('friendNameInput');
+const matchInfo = document.getElementById('matchInfo');
+const turnInfo = document.getElementById('turnInfo');
+const boardEl = document.getElementById('board');
+const resetBtn = document.getElementById('resetBtn');
+
+// initial UI
+myNameEl.textContent = myName;
+nameInput.value = myName;
+presenceEl.textContent = 'Online';
+
+// presence heartbeat
+function sendPresence(){
+  presenceChannel.postMessage({type:'presence',id:myId,name:myName,ts:Date.now()});
+}
+setInterval(sendPresence,4000);
+sendPresence();
+
+presenceChannel.onmessage = (ev)=>{
+  const m = ev.data;
+  if(m.type === 'presence'){
+    people[m.id] = {...people[m.id], id:m.id, name:m.name, online:true, lastSeen:m.ts};
+    renderPeople();
+  }
+}
+
+// remove stale people every 15s
+setInterval(()=>{
+  const now = Date.now();
+  for(const id in people){
+    if(id===myId) continue;
+    if(now - (people[id].lastSeen||0) > 15000) people[id].online=false;
+  }
+  renderPeople();
+},15000);
+
+// Chat handling
+chatChannel.onmessage = (ev)=>{
+  const m = ev.data;
+  appendChat(`${m.fromName}: ${m.text}`);
+}
+chatSend.addEventListener('click',()=>{
+  const txt = chatText.value.trim(); if(!txt) return;
+  chatChannel.postMessage({type:'chat',from:myId,fromName:myName,text:txt,ts:Date.now()});
+  appendChat(`Me: ${txt}`);
+  chatText.value='';
+});
+function appendChat(t){
+  const d = document.createElement('div'); d.textContent = t; chatBox.appendChild(d); chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+// people list rendering
+function renderPeople(){
+  peopleList.innerHTML='';
+  // sort by online first
+  const arr = Object.values(people).sort((a,b)=> (b.online?1:0)-(a.online?1:0));
+  // ensure me shown first
+  const me = {id:myId,name:myName,online:true};
+  peopleList.appendChild(renderPersonRow(me,true));
+  arr.forEach(p=>{
+    if(p.id===myId) return;
+    peopleList.appendChild(renderPersonRow(p,false));
+  });
+}
+function renderPersonRow(p,isMe){
+  const root = document.createElement('div'); root.className='friend';
+  const left = document.createElement('div');
+  left.style.display='flex';left.style.alignItems='center';left.style.gap='8px';
+  const dot = document.createElement('div'); dot.className='presence-dot ' + (p.online? 'presence-online':'presence-off');
+  const name = document.createElement('div'); name.textContent = p.name || 'Unnamed'; name.style.fontWeight='600';
+  left.appendChild(dot); left.appendChild(name);
+  const actions = document.createElement('div');
+  if(!isMe){
+    const btn = document.createElement('button'); btn.className='btn'; btn.textContent='Invite';
+    btn.onclick=()=>{ sendInvite(p.id); }
+    actions.appendChild(btn);
+  }
+  root.appendChild(left); root.appendChild(actions);
+  return root;
+}
+
+// friend add (local only)
+addFriendBtn.addEventListener('click',()=>{
+  const nm = friendNameInput.value.trim(); if(!nm) return;
+  const fakeId = 'friend-' + nm.replace(/\s+/g,'').toLowerCase() + '-' + Math.random().toString(36).slice(2,6);
+  people[fakeId] = {id:fakeId,name:nm,online:false,lastSeen:0};
+  friendNameInput.value=''; renderPeople();
+});
+
+// Invite flow
+function sendInvite(targetId){
+  matchChannel.postMessage({type:'invite',from:myId,fromName:myName,to:targetId,ts:Date.now()});
+  appendChat(`(system) You invited ${people[targetId]?.name || targetId}`);
+}
+matchChannel.onmessage = (ev)=>{
+  const m = ev.data;
+  if(m.type === 'invite' && m.to === myId){
+    // auto accept for demo
+    matchChannel.postMessage({type:'inviteAccept',from:myId,fromName:myName,to:m.from,ts:Date.now()});
+    appendChat(`(system) Auto-accepted invite from ${m.fromName}`);
+  }
+  if(m.type === 'inviteAccept' && m.to === myId){
+    // start match
+    startMatch(m.from, m.fromName);
+  }
+}
+
+// Random matchmaking: advertise availability and attempt to match within 2 minutes
+let available = false;
+btnRandom.addEventListener('click',()=>{
+  if(waitingForMatch){ waitingForMatch=false; btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent='Not matched'; return; }
+  waitingForMatch = true; btnRandom.textContent='Cancel (searching)'; matchInfo.textContent='Searching for random player...';
+  available = true;
+  // broadcast available state
+  matchChannel.postMessage({type:'available',id:myId,name:myName,ts:Date.now()});
+  const start = Date.now();
+  randomMatchTimer = setInterval(()=>{
+    // check for any available other player
+    for(const id in people){
+      if(id===myId) continue;
+      const p = people[id];
+      if(p.online){
+        // ask to match
+        matchChannel.postMessage({type:'matchRequest',from:myId,fromName:myName,to:id,ts:Date.now()});
+        // we'll wait answer
+      }
+    }
+    if(Date.now()-start > matchTimeoutMs){
+      // timeout -> fallback to AI
+      clearInterval(randomMatchTimer); waitingForMatch=false; available=false; btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent='No players found — playing vs AI';
+      startAIMatch();
+    }
+  },3000);
+});
+
+matchChannel.onmessage = (ev)=>{
+  const m = ev.data;
+  if(m.type === 'available'){
+    people[m.id] = {...people[m.id], id:m.id,name:m.name,online:true,lastSeen:m.ts}; renderPeople();
+  }
+  if(m.type === 'matchRequest' && m.to === myId){
+    // quick accept if free
+    if(!matchedWith){
+      matchChannel.postMessage({type:'matchAccept',from:myId,fromName:myName,to:m.from,ts:Date.now()});
+      startMatch(m.from, m.fromName);
+    }
+  }
+  if(m.type === 'matchAccept' && m.to === myId){
+    startMatch(m.from, m.fromName);
+  }
+}
+
+function startAIMatch(){
+  matchedWith = 'AI'; matchStartTime = Date.now(); matchInfo.textContent = 'Matched vs AI'; turnInfo.textContent = myName + ' (you)';
+}
+
+function startMatch(peerId, peerName){
+  if(matchedWith) return;
+  matchedWith = peerId; matchStartTime = Date.now(); waitingForMatch=false; available=false; clearInterval(randomMatchTimer);
+  btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent = 'Matched with ' + peerName; turnInfo.textContent = myName + ' (you)';
+  appendChat(`(system) Matched with ${peerName}`);
+}
+
+// ===== Simple board implementation (click move) =====
+const initialFEN = [
+  ['r','n','b','q','k','b','n','r'],
+  ['p','p','p','p','p','p','p','p'],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['P','P','P','P','P','P','P','P'],
+  ['R','N','B','Q','K','B','N','R']
+];
+let boardState = JSON.parse(JSON.stringify(initialFEN));
+let selected = null; // {r,c}
+
+function renderBoard(){
+  boardEl.innerHTML='';
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const sq = document.createElement('div');
+      sq.className = 'square ' + (((r+c)%2===0)?'light':'dark');
+      sq.dataset.r = r; sq.dataset.c = c;
+      const val = boardState[r][c];
+      if(val){
+        const p = document.createElement('div'); p.className='piece'; p.textContent = pieceCharToSymbol(val); sq.appendChild(p);
+      }
+      sq.onclick = onSquareClick;
+      boardEl.appendChild(sq);
+    }
+  }
+  highlightSelected();
+}
+function pieceCharToSymbol(ch){
+  const map = {K:'♔',Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙',k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'};
+  return map[ch]||'';
+}
+
+function onSquareClick(e){
+  const r = Number(this.dataset.r), c = Number(this.dataset.c);
+  const mode = document.getElementById('moveMode').value;
+  if(!selected){
+    if(boardState[r][c]){ selected = {r,c}; }
+  } else {
+    // move
+    const from = {...selected}, to = {r,c};
+    movePiece(from,to,true);
+    selected = null;
+  }
+  highlightSelected();
+}
+function movePiece(from,to,emit){
+  const piece = boardState[from.r][from.c];
+  boardState[to.r][to.c] = piece; boardState[from.r][from.c] = '';
+  renderBoard();
+  // emit to peer
+  if(emit && matchedWith && matchedWith!=='AI'){
+    matchChannel.postMessage({type:'move',fromId:myId,toId:matchedWith,move:{from, to, piece},ts:Date.now()});
+  }
+}
+
+function highlightSelected(){
+  const squares = boardEl.querySelectorAll('.square');
+  squares.forEach(s=>s.classList.remove('highlight'));
+  if(selected){
+    const idx = selected.r*8 + selected.c;
+    const node = squares[idx]; if(node) node.classList.add('highlight');
+  }
+}
+
+// receive remote moves
+matchChannel.onmessage = (ev)=>{
+  const m = ev.data;
+  if(m.type === 'move' && m.toId === myId){
+    // apply move
+    const mv = m.move;
+    movePiece(mv.from, mv.to, false);
+    appendChat(`(game) ${m.fromName} moved ${mv.piece} from ${mv.from.r},${mv.from.c} to ${mv.to.r},${mv.to.c}`);
+  }
+}
+
+resetBtn.addEventListener('click',()=>{ boardState = JSON.parse(JSON.stringify(initialFEN)); renderBoard(); appendChat('(system) Board reset'); });
+
+// auto-accept and presence on unload
+window.addEventListener('beforeunload',()=>{
+  presenceChannel.postMessage({type:'leave',id:myId,ts:Date.now()});
+});
+
+// Save name
+saveNameBtn.addEventListener('click',()=>{ myName = nameInput.value.trim() || myName; localStorage.setItem('cg_name', myName); myNameEl.textContent = myName; sendPresence(); });
+
+// simple chat append initial
+appendChat('(system) Welcome ' + myName + ' — open another tab to simulate other players.');
+renderBoard(); renderPeople();
+
+// Helper: AI move (random)
+function startAIMatch(){
+  matchedWith = 'AI'; matchStartTime = Date.now(); matchInfo.textContent = 'Matched vs AI'; turnInfo.textContent = myName + ' (you)';
+  appendChat('(system) Starting AI match (random moves)');
+  // AI will move randomly every 3 seconds
+  const aiInterval = setInterval(()=>{
+    if(matchedWith !== 'AI'){ clearInterval(aiInterval); return; }
+    // pick random non-empty piece for AI (black side)
+    let from=null, to=null;
+    const candidates = [];
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(boardState[r][c] && boardState[r][c] === boardState[r][c].toLowerCase()) candidates.push({r,c});
+    if(candidates.length===0) { clearInterval(aiInterval); appendChat('(system) AI has no pieces.'); return; }
+    from = candidates[Math.floor(Math.random()*candidates.length)];
+    // random dest
+    to = {r: Math.floor(Math.random()*8), c: Math.floor(Math.random()*8)};
+    movePiece(from,to,true);
+    appendChat('(game) AI moved');
+  },3000);
+}
+
+// Expose hooks for integrating a proper chess engine
+window.CG = {
+  sendMoveToPeer: (move)=>{ if(matchedWith && matchedWith!=='AI') matchChannel.postMessage({type:'move',fromId:myId,toId:matchedWith,fromName:myName,move,ts:Date.now()}); },
+  onRemoteMove: (fn)=>{ /* placeholder: use matchChannel.onmessage to capture move events */ }
+};
+
+/*
+  ---------------------- Server notes (Socket.IO) ----------------------
+  To make this work across devices, replace BroadcastChannel logic with a websocket server.
+  Example (client-side) using socket.io:
+
+  const socket = io('https://your-server.example');
+  socket.emit('presence', {id:myId, name:myName});
+  socket.on('matchRequest', (data)=>{ /* handle */ });
+  socket.on('move', (data)=>{ applyMoveFromServer(data); });
+
+  Server will maintain presence, match players, and relay 'move' and 'chat' events.
+
+  ---------------------------------------------------------------
+*/
+</script>
+</body>
+</html>
