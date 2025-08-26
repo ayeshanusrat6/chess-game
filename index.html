@@ -1,129 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chess</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Game</title>
   <style>
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: url('https://www.transparenttextures.com/patterns/chessboard.png');
+      background: url('https://upload.wikimedia.org/wikipedia/commons/3/3d/Chess_board_opening_staunton.jpg') no-repeat center center fixed;
       background-size: cover;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      color: #fff;
-      flex-direction: column;
+      color: white;
       text-align: center;
     }
-
-    h1 {
-      font-size: 3em;
-      color: gold;
-      text-shadow: 2px 2px 5px black;
-      margin-bottom: 20px;
-    }
-
-    .options {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 20px;
-      width: 80%;
-      max-width: 800px;
-    }
-
-    .card {
-      background: rgba(0, 0, 0, 0.7);
-      border-radius: 15px;
-      padding: 20px;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-      transition: transform 0.2s;
-      position: relative;
-    }
-
-    .card:hover {
-      transform: translateY(-5px);
-    }
-
-    .coins {
-      font-size: 1.5em;
-      color: gold;
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-
-    .reward {
-      font-size: 1.2em;
-      margin-bottom: 15px;
-    }
-
-    .play-btn {
-      background: linear-gradient(135deg, #00c853, #009624);
-      color: white;
-      border: none;
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       padding: 10px 20px;
-      border-radius: 25px;
-      cursor: pointer;
-      font-size: 1em;
-      transition: background 0.3s;
+      background: rgba(0,0,0,0.6);
     }
-
-    .play-btn:hover {
-      background: linear-gradient(135deg, #00e676, #00c853);
+    header h1 {
+      margin: 0;
+      font-size: 28px;
     }
-
-    .disabled {
-      background: grey !important;
-      cursor: not-allowed;
-    }
-
-    .message {
-      font-size: 1em;
-      color: red;
+    #coinCounter {
+      font-size: 18px;
+      color: gold;
       font-weight: bold;
+    }
+    main {
+      margin-top: 80px;
+    }
+    button {
+      display: block;
+      margin: 20px auto;
+      padding: 15px 30px;
+      font-size: 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: gold;
+      color: black;
+    }
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+    }
+    .modal-content {
+      background: #222;
+      margin: 100px auto;
+      padding: 20px;
+      width: 300px;
+      border-radius: 15px;
+      position: relative;
+      color: white;
+    }
+    .close {
+      position: absolute;
+      top: 10px; right: 15px;
+      font-size: 22px;
+      cursor: pointer;
+      color: red;
+    }
+    .bet-option {
+      background: #444;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 10px;
+      cursor: pointer;
+      color: gold;
+    }
+    .bet-option:hover {
+      background: gold;
+      color: black;
+    }
+    #matchmaking {
+      display: none;
+      margin-top: 50px;
+      font-size: 24px;
     }
   </style>
 </head>
 <body>
-  <h1>♟️ Chess</h1>
-  <div class="options">
-    <div class="card" id="option5">
-      <div class="coins">5 Coins</div>
-      <div class="reward">🏆 Win 10 Coins</div>
-      <button class="play-btn" onclick="playGame(5,10)">Play Now</button>
-      <div class="message" style="display:none;">🚫 Not enough coins</div>
-    </div>
-    <div class="card" id="option10">
-      <div class="coins">10 Coins</div>
-      <div class="reward">🏆 Win 20 Coins</div>
-      <button class="play-btn" onclick="playGame(10,20)">Play Now</button>
-      <div class="message" style="display:none;">🚫 Not enough coins</div>
-    </div>
-    <div class="card" id="option15">
-      <div class="coins">15 Coins</div>
-      <div class="reward">🏆 Win 30 Coins</div>
-      <button class="play-btn" onclick="playGame(15,30)">Play Now</button>
-      <div class="message" style="display:none;">🚫 Not enough coins</div>
+  <header>
+    <h1>♟ Chess</h1>
+    <div id="coinCounter">Coins: 50</div>
+  </header>
+
+  <main>
+    <button onclick="openOnline()">Play Online</button>
+    <button onclick="alert('Offline mode coming soon!')">Play Offline</button>
+    <button onclick="alert('Move pieces and checkmate your opponent!')">How to Play</button>
+
+    <div id="matchmaking"></div>
+  </main>
+
+  <!-- Modal for Bets -->
+  <div id="betModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal()">&times;</span>
+      <h2>Select Bet</h2>
+      <div class="bet-option" onclick="chooseBet(5,10)">5 Coins → Win 10</div>
+      <div class="bet-option" onclick="chooseBet(10,20)">10 Coins → Win 20</div>
+      <div class="bet-option" onclick="chooseBet(15,30)">15 Coins → Win 30</div>
     </div>
   </div>
 
   <script>
-    let playerCoins = 50; // New player startup coins
+    let coins = 50;
+    let timerInterval;
 
-    function playGame(entryFee, reward) {
-      if (playerCoins >= entryFee) {
-        playerCoins -= entryFee;
-        alert(`🎮 Game Started! Entry Fee: ${entryFee} coins.`);
-        // Matching logic will be added here
-      } else {
-        let optionId = `option${entryFee}`;
-        document.querySelector(`#${optionId} .play-btn`).classList.add('disabled');
-        document.querySelector(`#${optionId} .play-btn`).disabled = true;
-        document.querySelector(`#${optionId} .message`).style.display = 'block';
-      }
+    function updateCoins() {
+      document.getElementById('coinCounter').innerText = "Coins: " + coins;
     }
+
+    function openOnline() {
+      if(coins <= 0){
+        alert("No more coins!");
+        return;
+      }
+      document.getElementById('betModal').style.display = 'block';
+    }
+
+    function closeModal() {
+      document.getElementById('betModal').style.display = 'none';
+    }
+
+    function chooseBet(bet, win) {
+      if(coins < bet){
+        alert("Not enough coins!");
+        return;
+      }
+      coins -= bet;
+      updateCoins();
+      closeModal();
+      startMatchmaking(bet, win);
+    }
+
+    function startMatchmaking(bet, win) {
+      let matchmakingDiv = document.getElementById('matchmaking');
+      matchmakingDiv.style.display = 'block';
+      let timeLeft = 30;
+      matchmakingDiv.innerText = `Searching for a player... ${timeLeft}s`;
+      timerInterval = setInterval(()=>{
+        timeLeft--;
+        matchmakingDiv.innerText = `Searching for a player... ${timeLeft}s`;
+        if(timeLeft<=0){
+          clearInterval(timerInterval);
+          matchmakingDiv.innerText = "No player found. Try later.";
+          setTimeout(()=>{
+            matchmakingDiv.style.display = 'none';
+          }, 3000);
+        }
+      },1000);
+
+      // Simulate finding a player in 5 sec
+      setTimeout(()=>{
+        clearInterval(timerInterval);
+        let winner = Math.random()>0.5 ? "You" : "Opponent";
+        if(winner=="You"){ coins += win; updateCoins(); }
+        matchmakingDiv.innerText = `${winner} won the match!`;
+        setTimeout(()=>{ matchmakingDiv.style.display = 'none'; }, 4000);
+      },5000);
+    }
+
+    updateCoins();
   </script>
 </body>
 </html>
