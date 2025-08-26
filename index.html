@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chess — Online & Offline (Stakes & Coins)</title>
+  <title>Chess — Online & Offline (Stakes & Coins) — Improved</title>
   <style>
     :root{ --bg:#0f1724; --card:#0b1220; --accent:#06b6d4; --muted:#9aa6b2; --win:#10b981; --lose:#ef4444 }
     *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial}
@@ -23,7 +23,7 @@
     .stake.active{background:rgba(6,182,212,0.12);border-color:rgba(6,182,212,0.3)}
     .modes{display:flex;gap:8px;margin-top:8px}
     .status{margin-top:8px;font-size:13px}
-    .match-log{height:140px;overflow:auto;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;margin-top:10px;font-size:13px}
+    .match-log{height:140px;overflow:auto;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;margin-top:10px;font-size:13px;white-space:pre-wrap}
 
     /* board */
     .board-wrap{display:flex;gap:18px;align-items:flex-start}
@@ -145,15 +145,19 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.5/chess.min.js"></script>
   <script>
-    // Simple single-file chess app with stake system, localStorage account, and multi-tab friend simulation.
+    // Improved single-file chess app — fixes:
+    // - friend-match protocol (matchId + accept) so both tabs sync
+    // - notify/broadcast ordering fixed
+    // - safer storage parsing, try/catch for incoming SAN moves
+    // - clearer button feedback and active states
 
     // ---------- Utilities ----------
     function uid(){return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16))}
     function now(){return new Date().toLocaleTimeString()}
-    function log(msg){const el=document.getElementById('matchLog');el.innerHTML += `\n[${now()}] ${msg}`; el.scrollTop = el.scrollHeight}
+    function log(msg){const el=document.getElementById('matchLog'); el.innerText += `\n[${now()}] ${msg}`; el.scrollTop = el.scrollHeight}
 
     // ---------- Account & Persistence ----------
-    const KEY = 'chess_demo_account_v1'
+    const KEY = 'chess_demo_account_v2'
     let account = JSON.parse(localStorage.getItem(KEY) || 'null') || {id:null,name:'Player-' + Math.random().toString(36).slice(2,6),coins:45,streak:0,lastClaim:null}
     if(!account.id) account.id = uid()
     function saveAccount(){localStorage.setItem(KEY, JSON.stringify(account)); document.getElementById('playerId').innerText = 'Player ID: ' + account.id; document.getElementById('coins').innerText = account.coins}
@@ -165,15 +169,23 @@
     // ---------- Stakes & Modes ----------
     let selectedStake = 5
     document.querySelectorAll('.stake').forEach(el=>{ el.addEventListener('click', ()=>{ document.querySelectorAll('.stake').forEach(s=>s.classList.remove('active')); el.classList.add('active'); selectedStake = Number(el.dataset.value); log('Stake set to ' + selectedStake) }) })
-    // default select first
     document.querySelector('.stake').classList.add('active')
 
     // modes
     const statusEl = document.getElementById('status')
-    let currentMode = 'local' // 'friend' | 'random' | 'local'
-    document.getElementById('modeFriend').addEventListener('click', ()=> startFriendMatch())
-    document.getElementById('modeRandom').addEventListener('click', ()=> startRandomMatch())
-    document.getElementById('modeOffline').addEventListener('click', ()=> startOfflineMatch())
+    let currentMode = 'local' // 'friend' | 'random' | 'local' | 'offline'
+    let currentMatchId = null
+    let localRole = null
+
+    const btnFriend = document.getElementById('modeFriend')
+    const btnRandom = document.getElementById('modeRandom')
+    const btnOffline = document.getElementById('modeOffline')
+
+    btnFriend.addEventListener('click', ()=> startFriendMatch())
+    btnRandom.addEventListener('click', ()=> startRandomMatch())
+    btnOffline.addEventListener('click', ()=> startOfflineMatch())
+
+    function setModeButtonsActive(id){ [btnFriend, btnRandom, btnOffline].forEach(b=>b.classList.remove('active')); document.getElementById(id).classList.add('active') }
 
     // ---------- Chess board + moves using chess.js ----------
     const CHESS = new Chess()
@@ -213,7 +225,7 @@
       // try move
       const move = CHESS.move({ from:selectedSquare, to:sq, promotion:'q' })
       selectedSquare = null
-      if(move){ updateMoves(); renderBoard(); checkGameOver(); notifyMove(move) } else { log('Invalid move') }
+      if(move){ updateMoves(); renderBoard(); checkGameOver(); notifyAndBroadcast(move) } else { log('Invalid move') }
     }
 
     function updateMoves(){
@@ -222,13 +234,19 @@
       else movesEl.innerText = history.map((m,i)=> (i%2? `${m.san}`: `${Math.floor(i/2)+1}. ${m.san}`)).join(' ')
     }
 
-    function notifyMove(move){ log(`Move: ${move.san}`) }
+    // Combined notifier + broadcast (used after a successful local move)
+    function notifyAndBroadcast(move){
+      log(`Move: ${move.san}`)
+      if(currentMode === 'friend' && currentMatchId){ broadcastMoveSAN(move.san) }
+    }
 
     function checkGameOver(){
       if(CHESS.game_over()){
         let res = 'Draw'
         if(CHESS.in_checkmate()){
-          res = (CHESS.turn() === 'b') ? 'White wins (checkmate)' : 'Black wins (checkmate)'
+          // if it's checkmate, the player who *didn't* move last is the winner
+          const winner = CHESS.turn() === 'w' ? 'Black' : 'White'
+          res = `${winner} wins (checkmate)`
         } else if(CHESS.in_stalemate()){ res = 'Stalemate' }
         document.getElementById('resultBox').innerText = res
         log('Game over: ' + res)
@@ -237,7 +255,7 @@
     }
 
     // Undo & restart
-    document.getElementById('undoBtn').addEventListener('click', ()=>{ const mv = CHESS.undo(); if(mv){ updateMoves(); renderBoard(); log('Undo: ' + mv.san) } })
+    document.getElementById('undoBtn').addEventListener('click', ()=>{ const mv = CHESS.undo(); if(mv){ updateMoves(); renderBoard(); log('Undo: ' + (mv.san||JSON.stringify(mv))) } })
     document.getElementById('restartBtn').addEventListener('click', ()=>{ CHESS.reset(); updateMoves(); renderBoard(); document.getElementById('resultBox').innerText='None'; log('Board reset') })
 
     // Resign
@@ -245,22 +263,19 @@
 
     // ---------- Match finalization & coin handling ----------
     function finalizeMatch(resultText){
-      // Evaluate winner for stake distribution (very simple parsing)
+      // safer parsing and parentheses fixed
       let change = 0
-      if(resultText.toLowerCase().includes('white wins') || resultText.toLowerCase().includes('black') && resultText.toLowerCase().includes('wins')){
-        // check who won — if account plays white by default
-        // For simplicity assume local player is always white in online matches initiated from this tab
+      const low = resultText.toLowerCase()
+      if(low.includes('wins')){
+        const whiteWon = low.includes('white')
         const youAreWhite = (currentMode !== 'friend') ? true : (localRole === 'white')
-        if(resultText.toLowerCase().includes('white')){
-          change = youAreWhite ? selectedStake : -selectedStake
-        } else if(resultText.toLowerCase().includes('black')){
-          change = youAreWhite ? -selectedStake : selectedStake
-        }
-      } else if(resultText.toLowerCase().includes('draw') || resultText.toLowerCase().includes('stalemate')){
+        if(whiteWon) change = youAreWhite ? selectedStake : -selectedStake
+        else change = youAreWhite ? -selectedStake : selectedStake
+      } else if(low.includes('draw') || low.includes('stalemate')){
         change = 0
-      } else if(resultText.toLowerCase().includes('resign')){
-        // resign text contains who won
-        change = resultText.toLowerCase().includes('white') ? selectedStake : -selectedStake
+      } else if(low.includes('resign')){
+        // 'Black (resign)' means black won — parse accordingly
+        change = low.includes('white') ? selectedStake : -selectedStake
       }
 
       if(currentMode === 'local' || currentMode === 'offline' || currentMode === 'random' || currentMode === 'friend'){
@@ -271,22 +286,20 @@
     }
 
     // ---------- Offline (vs computer) ----------
-    document.getElementById('modeOffline').addEventListener('click', startOfflineMatch)
     function startOfflineMatch(){
       currentMode = 'offline'
+      setModeButtonsActive('modeOffline')
       document.getElementById('matchMode').innerText = 'Offline (vs Computer)'
       CHESS.reset(); renderBoard(); updateMoves(); document.getElementById('resultBox').innerText='None'
       log('Started offline match vs computer. Stake: ' + selectedStake)
       statusEl.innerText = 'Status: Playing vs Computer'
-      // we'll make computer play immediate random legal move when it's black's turn
       computerPlayLoop()
     }
 
     function computerPlayLoop(){
-      // simple loop checking if computer to move
       const loop = setInterval(()=>{
         if(CHESS.game_over()){ clearInterval(loop); checkGameOver(); return }
-        if(CHESS.turn() === 'b'){ // computer plays black
+        if(CHESS.turn() === 'b'){
           const moves = CHESS.moves()
           const mv = moves[Math.floor(Math.random()*moves.length)]
           CHESS.move(mv)
@@ -298,21 +311,19 @@
     // ---------- Random Match (simulated) ----------
     function startRandomMatch(){
       currentMode = 'random'
+      setModeButtonsActive('modeRandom')
       document.getElementById('matchMode').innerText = 'Random Match (simulated)'
       statusEl.innerText = 'Status: Searching random players...'
       log('Searching random players...')
-      // simulate matchmaking delay
       setTimeout(()=>{
         CHESS.reset(); renderBoard(); updateMoves(); document.getElementById('resultBox').innerText='None'
         statusEl.innerText = 'Status: Paired with random opponent (simulated)'
         log('Paired with random opponent — match start')
-        // simulate opponent moves as a second player that occasionally plays
         simulatedOpponentLoop()
-      }, 1400 + Math.random()*2000)
+      }, 1000 + Math.random()*1500)
     }
 
     function simulatedOpponentLoop(){
-      // simulate opponent that plays every 1-2s when it's black's turn
       const loop = setInterval(()=>{
         if(CHESS.game_over()){ clearInterval(loop); checkGameOver(); return }
         if(CHESS.turn() === 'b'){
@@ -326,63 +337,81 @@
     }
 
     // ---------- Friend Match (multi-tab using localStorage) ----------
-    // We'll use a small protocol: set localStorage['chess_match_request'] with {id,from,role} to invite
-    let localRole = null
+    // Protocol:
+    // - inviter writes 'chess_match_invite' = {matchId, from}
+    // - acceptor sees invite and writes 'chess_match_accept' = {matchId, from, acceptor}
+    // - both tabs then set currentMatchId = matchId and roles: inviter=white, acceptor=black
+
     function startFriendMatch(){
       currentMode = 'friend'
+      setModeButtonsActive('modeFriend')
       document.getElementById('matchMode').innerText = 'Play with Friend (multi-tab)'
       statusEl.innerText = 'Status: Waiting for friend... (open another tab and click Play with Friend)'
-      log('Friend match: waiting for partner — broadcasting invite')
-      // broadcast invite
-      const invite = {id: uid(), from: account.id, time: Date.now()}
+      log('Friend match: broadcasting invite')
+      const matchId = uid()
+      const invite = {matchId, from: account.id, time: Date.now()}
       localStorage.setItem('chess_match_invite', JSON.stringify(invite))
-
-      // wait for accept via storage event (other tab will write chess_match_accept)
+      // set this tab as inviter and wait for accept
+      currentMatchId = matchId
+      localRole = 'white'
     }
 
     window.addEventListener('storage', (e)=>{
       try{
-        if(e.key === 'chess_match_invite'){ const inv = JSON.parse(e.newValue); if(inv.from !== account.id){ // accept invite automatically
-            log('Found invite from ' + inv.from + '. Accepting...'); const acc = {inviteId:inv.id,acceptor:account.id,role:'black',time:Date.now()}; localStorage.setItem('chess_match_accept', JSON.stringify(acc)) }
-        }
-        if(e.key === 'chess_match_accept'){ const acc = JSON.parse(e.newValue); if(acc.acceptor !== account.id){ // we are the acceptor side in other tab
-            // if we wrote accept, start match
-          }
-          // If we are the one who initiated invite, and acceptor is different -> start match
-          if(currentMode === 'friend'){
-            log('Match accepted by ' + acc.acceptor)
-            // assign roles: inviter is white, acceptor is black
-            localRole = (acc.acceptor === account.id) ? 'black' : 'white'
-            statusEl.innerText = 'Status: Friend matched — role: ' + localRole
+        if(!e.key) return
+        // Invite discovered
+        if(e.key === 'chess_match_invite'){
+          const inv = JSON.parse(e.newValue || '{}')
+          if(inv.from && inv.from !== account.id){
+            log('Found invite from ' + inv.from + ' — accepting')
+            const acc = {matchId: inv.matchId, from: inv.from, acceptor: account.id, time: Date.now()}
+            localStorage.setItem('chess_match_accept', JSON.stringify(acc))
+            // set acceptor state
+            currentMatchId = inv.matchId
+            localRole = 'black'
+            currentMode = 'friend'
+            document.getElementById('matchMode').innerText = 'Play with Friend (multi-tab)'
+            statusEl.innerText = 'Status: Accepted invite — connected as black'
             CHESS.reset(); renderBoard(); updateMoves(); document.getElementById('resultBox').innerText='None'
-            log('Friend match started — you are ' + localRole)
-            // start a simple loop: if you are black, opponent moves as other tab
-            if(localRole === 'white'){ // wait for opponent moves via storage
-              // both tabs will use storage key 'chess_move_<matchId>' to send moves
+            log('Friend match started — you are black')
+          }
+        }
+
+        // Accept discovered
+        if(e.key === 'chess_match_accept'){
+          const acc = JSON.parse(e.newValue || '{}')
+          if(acc.from && acc.from !== account.id){
+            // inviter sees accept — start match
+            if(currentMode === 'friend' && currentMatchId === acc.matchId){
+              localRole = 'white'
+              statusEl.innerText = 'Status: Friend matched — role: ' + localRole
+              CHESS.reset(); renderBoard(); updateMoves(); document.getElementById('resultBox').innerText='None'
+              log('Match accepted by ' + acc.acceptor + ' — you are white')
             }
           }
         }
+
+        // Moves for this match
         if(e.key && e.key.startsWith('chess_move_')){
-          const m = JSON.parse(e.newValue)
-          // ignore if move originated here
-          if(m.from === account.id) return
-          if(m.san){ CHESS.move(m.san); updateMoves(); renderBoard(); log('Friend played: ' + m.san); checkGameOver() }
+          const payload = JSON.parse(e.newValue || '{}')
+          if(!payload || !payload.matchId) return
+          if(payload.matchId !== currentMatchId) return // ignore other matches
+          if(payload.from === account.id) return // ignore our own writes
+          // apply opponent move safely
+          try{
+            const applied = CHESS.move(payload.san)
+            if(applied){ updateMoves(); renderBoard(); log('Friend played: ' + payload.san); checkGameOver() }
+          }catch(err){ console.error('Failed to apply friend move:', err) }
         }
       }catch(err){console.error(err)}
     })
 
-    // When in friend mode, after making moves broadcast them
     function broadcastMoveSAN(san){
-      // find current match id (use last invite)
-      const invite = JSON.parse(localStorage.getItem('chess_match_invite') || 'null')
-      const matchId = invite ? invite.id : 'local_friend'
-      const key = 'chess_move_' + matchId
-      localStorage.setItem(key, JSON.stringify({from:account.id, san:san, time:Date.now()}))
+      if(!currentMatchId) return
+      const key = 'chess_move_' + currentMatchId
+      const payload = {matchId: currentMatchId, from: account.id, san: san, time: Date.now()}
+      localStorage.setItem(key, JSON.stringify(payload))
     }
-
-    // Patch notifyMove to broadcast when friend match
-    const originalNotify = notifyMove
-    notifyMove = function(move){ originalNotify(move); if(currentMode === 'friend'){ broadcastMoveSAN(move.san) } }
 
     // ---------- Daily bonus ----------
     const claimBtn = document.getElementById('claimDaily')
@@ -390,7 +419,6 @@
     claimBtn.addEventListener('click', ()=>{
       const today = new Date().toDateString()
       if(account.lastClaim === today){ alert('Already claimed today') ; return }
-      // if previous claim was yesterday increment streak else reset
       const yesterday = new Date(Date.now() - 86400000).toDateString()
       if(account.lastClaim === yesterday) account.streak = Math.min(account.streak+1,3)
       else account.streak = 1
@@ -402,16 +430,13 @@
 
     // ---------- Init ----------
     renderBoard(); updateMoves(); loadDaily(); document.getElementById('playerId').innerText = 'Player ID: ' + account.id
-
-    // When user makes a move in friend match, broadcast
-    // We need to override CHESS.move usage to capture SAN — we do in notifyMove wrapper
-
-    // Show initial log
     log('Welcome ' + account.name + ' — coins: ' + account.coins)
 
-    // When page closed, do a friendly log
-    window.addEventListener('beforeunload', ()=>{ log('Leaving tab') })
+    // small helper: if localStorage keys exist from previous runs, clear old chess_move_* entries to avoid confusion
+    // NOTE: keep this commented unless needed for debugging
+    // Object.keys(localStorage).filter(k=>k.startsWith('chess_move_')).forEach(k=>localStorage.removeItem(k))
 
+    window.addEventListener('beforeunload', ()=>{ log('Leaving tab') })
   </script>
 </body>
 </html>
