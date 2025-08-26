@@ -1,479 +1,432 @@
-<!--
-Filename: chess-game-fixed.html
-Description: Complete single-file chess web app focused on
-- Readable text on dark background (light text colors)
-- Simulated online play (works across tabs on same browser via BroadcastChannel)
-- Random-match within 2 minutes (120s) or fallback to AI
-- Friend list, friend requests, chat, and presence
-- Move-sending between matched players
-
-Notes:
-- This file simulates online features using BroadcastChannel (works only for pages/tabs from same origin).
-- For real cross-device online play, integrate with a server (Socket.IO). A commented snippet near the bottom explains how to do that.
-- The chessboard here is a minimal clickable board that allows selecting and moving pieces (no rule-enforcement). Hooks are provided for integrating a full chess engine.
-- Save as an .html file and open in multiple tabs to test online features.
--->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Chess Game — Fixed (Ayesha)</title>
+<title>Chess — Complete (Ayesha) </title>
+<!--
+Complete single-file chess app (enhanced from previous version)
+Features added/kept:
+- Keeps previous BroadcastChannel simulated online features (presence, chat, invites, random match)
+- Adds front menu with 3 options: Online / Offline / Daily Bonus
+- Online: stake coins (5 / 10 / 20), choose Friend or Random. Deducts stake on match start; rewards on win.
+- Offline: Human vs Human (no coins) or Human vs Computer (Easy/Medium/Hard) with coin rewards (4/7/10)
+- Uses chess.js (rules engine) via CDN for legal move generation and checkmate/stalemate detection
+- Enforces alternate turns and shows game status (You Win / You Lose / Draw)
+- Daily bonus streak system (+5 on day1, +10 on day2, etc.)
+- All previous UI elements (chat, people list, friend invite, move send) retained and improved
+Notes:
+- For real cross-device play replace BroadcastChannel with a server (Socket.IO). See commented notes at bottom.
+- To test online features: open this file in multiple tabs (same origin) and set different names.
+-->
 <style>
-  :root{
-    --bg:#0b0f13; /* dark background */
-    --panel:#0f1720;
-    --muted:#cbd5e1;
-    --accent:#7dd3fc;
-    --card:#0b1220;
-    --danger:#fb7185;
-    --success:#34d399;
-    --board-light:#e6e6e6;
-    --board-dark:#1f2937;
-    --white-piece:#ffffff;
-    --black-piece:#111827;
-  }
-  *{box-sizing:border-box;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
-  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#07101a);color:var(--muted)}
-  header{display:flex;gap:20px;align-items:center;padding:16px 20px}
-  h1{margin:0;color:var(--accent);font-size:20px}
-  .container{display:grid;grid-template-columns:360px 1fr 320px;gap:18px;padding:12px}
-  .card{background:linear-gradient(180deg,var(--card),var(--panel));padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
-
-  /* Left column */
-  .left{display:flex;flex-direction:column;gap:12px}
-  .status{display:flex;justify-content:space-between;align-items:center}
-  .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;color:var(--muted);cursor:pointer}
-  .btn.primary{background:linear-gradient(90deg,var(--accent),#60a5fa);color:#061018;border:none}
-  .small{font-size:13px;color:#9aa7b6}
-
-  /* Board area */
-  .board-wrap{display:flex;justify-content:center;align-items:center}
-  .board{width:520px;height:520px;border-radius:8px;overflow:hidden;border:2px solid rgba(255,255,255,0.04);display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr)}
-  .square{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none}
-  .square.light{background:var(--board-light)}
-  .square.dark{background:var(--board-dark);color:#eee}
-  .piece{font-size:30px;cursor:pointer}
-  .square.highlight{outline:4px solid rgba(125,211,252,0.18)}
-
-  /* right column */
-  .right{display:flex;flex-direction:column;gap:12px}
-  .list{max-height:280px;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
-  .friend{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
-  .presence-dot{width:10px;height:10px;border-radius:50%}
-  .presence-online{background:var(--success)}
-  .presence-off{background:#475569}
-  .chat-box{height:220px;overflow:auto;padding:8px;background:linear-gradient(180deg,#07102110,#07102120);border-radius:8px}
-  .chat-input{display:flex;gap:8px;margin-top:8px}
-  input,textarea,select{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--muted);outline:none}
-  label{font-size:13px;color:#9aa7b6}
-
-  footer{padding:12px 20px;color:#8b98a6;font-size:13px}
-
-  /* responsive */
-  @media(max-width:1100px){.container{grid-template-columns:1fr}} 
+:root{--bg:#07121a;--panel:#081322;--muted:#cbd5e1;--accent:#7dd3fc;--card:#071522;--success:#34d399}
+*{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#04101a);color:var(--muted)}
+header{display:flex;align-items:center;gap:12px;padding:14px 18px}
+h1{color:var(--accent);margin:0}
+.container{padding:12px}
+.menu{display:flex;gap:12px;align-items:center}
+.btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;color:var(--muted);cursor:pointer}
+.btn.primary{background:linear-gradient(90deg,var(--accent),#60a5fa);color:#061018;border:none}
+.layout{display:grid;grid-template-columns:360px 1fr 320px;gap:16px;margin-top:12px}
+.card{background:linear-gradient(180deg,var(--card),var(--panel));padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+.board{width:560px;height:560px;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);border-radius:8px;overflow:hidden}
+.square{display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none}
+.square.light{background:#f0d9b5}
+.square.dark{background:#b58863;color:#111}
+.piece{font-size:34px}
+.highlight{outline:4px solid rgba(125,211,252,0.18)}
+.controls{display:flex;gap:8px;align-items:center}
+.list{max-height:280px;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+.friend{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
+.presence-dot{width:10px;height:10px;border-radius:50%}
+.presence-online{background:var(--success)}
+.presence-off{background:#475569}
+.chat-box{height:220px;overflow:auto;padding:8px;background:linear-gradient(180deg,#07102110,#07102120);border-radius:8px}
+input,select{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--muted);outline:none}
+.footer{margin-top:12px;color:#8b98a6}
+@media(max-width:1100px){.layout{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
-  <h1>Chess — Multiplayer (Fixed)</h1>
-  <div class="small">Readable text + 2-minute random matchmaking + friend/chat (same-origin simulation)</div>
+  <h1>♟️ Chess</h1>
+  <div class="menu">
+    <button id="menuOnline" class="btn">Online</button>
+    <button id="menuOffline" class="btn">Offline</button>
+    <button id="menuBonus" class="btn">Daily Bonus</button>
+  </div>
 </header>
 <div class="container">
-  <div class="left card">
-    <div class="status">
-      <div>
-        <div class="small">You:</div>
-        <div id="myName" style="font-weight:700;color:var(--muted)"></div>
+  <div id="mainArea" class="card">
+    <!-- dynamic content: front menu or game area -->
+    <div id="frontScreen">
+      <h2 style="margin-top:0;color:var(--accent)">Welcome to Chess</h2>
+      <p class="small">Choose a mode to start playing. Your coins and daily bonus are stored locally.</p>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button id="startOnline" class="btn primary">Play Online</button>
+        <button id="startOffline" class="btn">Play Offline</button>
+        <button id="startBonus" class="btn">Claim Daily Bonus</button>
       </div>
-      <div style="text-align:right">
-        <div class="small">Status</div>
-        <div id="presence" style="font-weight:700;color:var(--muted)">Offline</div>
-      </div>
-    </div>
-
-    <div style="margin-top:8px">
-      <label>Display name</label>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <input id="nameInput" placeholder="type your name" />
-        <button id="saveName" class="btn primary">Save</button>
+      <div style="margin-top:12px">
+        <label>Coins: <strong id="coinDisplay">0</strong></label>
       </div>
     </div>
 
-    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-      <button id="btnRandom" class="btn">Random Match (2 min)</button>
-      <button id="btnFriendInvite" class="btn">Invite Friend</button>
+    <div id="onlineScreen" style="display:none">
+      <h3>Online — Choose stake & mode</h3>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <label>Stake:</label>
+        <button class="btn stake" data-stake="5">5</button>
+        <button class="btn stake" data-stake="10">10</button>
+        <button class="btn stake" data-stake="20">20</button>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="onlineFriend" class="btn">Play with Friend</button>
+        <button id="onlineRandom" class="btn primary">Play Random</button>
+        <button id="onlineBack" class="btn">Back</button>
+      </div>
+      <div style="margin-top:8px" id="onlineInfo"></div>
     </div>
 
-    <div style="margin-top:10px">
-      <label>Game options</label>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <select id="moveMode">
-          <option value="click">Click move (select -> click dest)</option>
-          <option value="step">Step-by-step (highlight each move)</option>
-        </select>
-        <input id="timerPerMove" type="number" min="10" value="60" style="width:120px" />
+    <div id="offlineScreen" style="display:none">
+      <h3>Offline</h3>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button id="offlineHuman" class="btn">Human (same device)</button>
+        <button id="offlineComputer" class="btn primary">Computer</button>
+        <button id="offlineBack" class="btn">Back</button>
+      </div>
+      <div id="computerOptions" style="display:none;margin-top:8px">
+        <label>Difficulty:</label>
+        <button class="btn diff" data-diff="easy">Easy (+4)</button>
+        <button class="btn diff" data-diff="medium">Medium (+7)</button>
+        <button class="btn diff" data-diff="hard">Hard (+10)</button>
       </div>
     </div>
+
+    <div id="bonusScreen" style="display:none">
+      <h3>Daily Bonus</h3>
+      <p>Claim daily coins to build a streak.</p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="claimBonus" class="btn primary">Claim Bonus</button>
+        <button id="bonusBack" class="btn">Back</button>
+      </div>
+      <div style="margin-top:8px" id="bonusInfo"></div>
+    </div>
+
+    <div id="gameScreen" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div id="gameTitle" style="font-weight:700;color:var(--accent)"></div>
+          <div class="small">Match: <span id="matchInfo">—</span></div>
+        </div>
+        <div style="text-align:right">
+          <div class="small">Turn: <span id="turnInfo">—</span></div>
+          <div class="small">Status: <span id="statusInfo">—</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:12px;align-items:flex-start">
+        <div>
+          <div id="board" class="board"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="resignBtn" class="btn">Give Up</button>
+            <button id="rematchBtn" class="btn">Rematch</button>
+            <button id="leaveBtn" class="btn">Leave</button>
+          </div>
+        </div>
+        <div style="width:280px">
+          <label>You: <strong id="myName">Player</strong></label>
+          <div style="margin-top:8px">Coins: <strong id="myCoinsInGame">0</strong></div>
+          <div style="margin-top:12px">
+            <label>Chat</label>
+            <div class="chat-box" id="chatBox"></div>
+            <div style="display:flex;gap:8px;margin-top:8px"><input id="chatText" placeholder="message" /><button id="chatSend" class="btn primary">Send</button></div>
+          </div>
+          <div style="margin-top:12px">
+            <label>People</label>
+            <div style="display:flex;gap:8px;margin-top:8px"><input id="friendNameInput" placeholder="friend name" /><button id="addFriendBtn" class="btn">Add</button></div>
+            <div class="list" id="peopleList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <div class="card" style="display:flex;flex-direction:column;gap:12px;align-items:center">
-    <div style="display:flex;gap:12px;width:100%;justify-content:center;align-items:center">
-      <div class="small">Match status: <span id="matchInfo">Not matched</span></div>
-      <div class="small">Turn: <span id="turnInfo">—</span></div>
-    </div>
-    <div class="board-wrap">
-      <div id="board" class="board"></div>
-    </div>
-    <div style="width:100%;display:flex;gap:8px;justify-content:center">
-      <button id="resetBtn" class="btn">Reset Board</button>
-      <button id="giveUp" class="btn">Give Up</button>
-    </div>
-  </div>
-
-  <div class="right card">
-    <div>
-      <label>Friends / People</label>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input id="friendNameInput" placeholder="friend name" />
-        <button id="addFriendBtn" class="btn">Add</button>
+  <div class="layout">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div class="small">Account</div><div class="small">Status</div></div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <input id="nameInput" placeholder="your name" />
+        <button id="saveName" class="btn">Save</button>
       </div>
-      <div class="list" id="peopleList"></div>
+      <div style="margin-top:8px">Coins: <strong id="coinPanel">0</strong></div>
+      <div style="margin-top:8px">Player ID: <span id="playerId"></span></div>
+      <div style="margin-top:8px" id="presenceStatus">Offline</div>
+      <div style="margin-top:12px">Match log:</div>
+      <div id="log" style="max-height:240px;overflow:auto;margin-top:6px;background:rgba(255,255,255,0.02);padding:8px;border-radius:6px"></div>
     </div>
 
-    <div>
-      <label>Chat</label>
-      <div class="chat-box" id="chatBox"></div>
-      <div class="chat-input">
-        <input id="chatText" placeholder="type message" />
-        <button id="chatSend" class="btn primary">Send</button>
-      </div>
+    <div class="card">
+      <h4 style="margin-top:0">Help & Notes</h4>
+      <p class="small">Open this page in another tab to simulate online players. For real cross-device matches you need a server (Socket.IO). Chess rules are enforced using chess.js.</p>
+      <p class="small">Coins are stored in localStorage and used for stakes/computer wins.</p>
     </div>
   </div>
 </div>
-<footer class="card" style="margin:12px">Tip: open this file in another tab (same browser) and set a different name to simulate online players. Random matching will pair available players within 120 seconds or fall back to an AI opponent.</footer>
+<footer class="footer card">Tip: Open multiple tabs to test online mode. This file uses BroadcastChannel for simulation. For production, integrate a server.</footer>
 
+<!-- chess.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0-beta.1/dist/chess.min.js"></script>
 <script>
-// ==================== Basic app state ====================
-const myId = crypto.randomUUID();
-let myName = localStorage.getItem('cg_name') || 'Player-' + myId.slice(0,4);
-let presenceChannel = new BroadcastChannel('chess_presence_channel_v1');
-let chatChannel = new BroadcastChannel('chess_chat_channel_v1');
-let matchChannel = new BroadcastChannel('chess_match_channel_v1');
-let people = {}; // id -> {name, online, lastSeen, id}
-let matchedWith = null;
-let matchStartTime = null;
-let waitingForMatch = false;
-let randomMatchTimer = null;
-let matchTimeoutMs = 120000; // 2 minutes
+// ================== State and channels ==================
+const myId = localStorage.getItem('cg_id') || crypto.randomUUID(); localStorage.setItem('cg_id', myId);
+let myName = localStorage.getItem('cg_name') || ('Player-'+myId.slice(0,4));
+let coins = Number(localStorage.getItem('cg_coins')||0) || 50; // give some starter coins for testing
+localStorage.setItem('cg_coins', coins);
+const presenceChannel = new BroadcastChannel('chess_presence_v2');
+const chatChannel = new BroadcastChannel('chess_chat_v2');
+const matchChannel = new BroadcastChannel('chess_match_v2');
+let people = {};
+let currentMatch = null; // {id,peerId,mode,stake,side,startedAt,vs}
+let waitingForMatch=false;
+let chess = null; // Chess() engine
+let boardState = null; // mirror of chess.fen moves
+let turnSide = null; // 'w' or 'b'
+let selectedSquare = null;
+let inGame = false;
+let aiDifficulty = null;
 
 // UI refs
-const myNameEl = document.getElementById('myName');
-const presenceEl = document.getElementById('presence');
+const coinDisplay = document.getElementById('coinDisplay');
+const coinPanel = document.getElementById('coinPanel');
+const playerIdEl = document.getElementById('playerId');
 const nameInput = document.getElementById('nameInput');
 const saveNameBtn = document.getElementById('saveName');
-const btnRandom = document.getElementById('btnRandom');
-const peopleList = document.getElementById('peopleList');
-const chatBox = document.getElementById('chatBox');
-const chatText = document.getElementById('chatText');
-const chatSend = document.getElementById('chatSend');
-const addFriendBtn = document.getElementById('addFriendBtn');
-const friendNameInput = document.getElementById('friendNameInput');
+const myNameEl = document.getElementById('myName');
+const frontScreen = document.getElementById('frontScreen');
+const onlineScreen = document.getElementById('onlineScreen');
+const offlineScreen = document.getElementById('offlineScreen');
+const bonusScreen = document.getElementById('bonusScreen');
+const gameScreen = document.getElementById('gameScreen');
+const boardEl = document.getElementById('board');
 const matchInfo = document.getElementById('matchInfo');
 const turnInfo = document.getElementById('turnInfo');
-const boardEl = document.getElementById('board');
-const resetBtn = document.getElementById('resetBtn');
+const statusInfo = document.getElementById('statusInfo');
+const logEl = document.getElementById('log');
+const peopleList = document.getElementById('peopleList');
+const chatBox = document.getElementById('chatBox');
 
-// initial UI
-myNameEl.textContent = myName;
-nameInput.value = myName;
-presenceEl.textContent = 'Online';
+playerIdEl.textContent = myId; nameInput.value = myName; myNameEl.textContent = myName;
+updateCoinDisplay(); renderPeople();
 
-// presence heartbeat
-function sendPresence(){
-  presenceChannel.postMessage({type:'presence',id:myId,name:myName,ts:Date.now()});
-}
-setInterval(sendPresence,4000);
-sendPresence();
+// presence
+function sendPresence(){ presenceChannel.postMessage({type:'presence',id:myId,name:myName,ts:Date.now()}); }
+setInterval(sendPresence,4000); sendPresence();
+presenceChannel.onmessage = (ev)=>{ const m=ev.data; if(m.type==='presence'){ people[m.id] = {...people[m.id],id:m.id,name:m.name,lastSeen:m.ts,online:true}; renderPeople(); } }
+setInterval(()=>{ const now=Date.now(); for(const id in people){ if(now - (people[id].lastSeen||0) > 15000) people[id].online=false; } renderPeople(); },15000);
 
-presenceChannel.onmessage = (ev)=>{
-  const m = ev.data;
-  if(m.type === 'presence'){
-    people[m.id] = {...people[m.id], id:m.id, name:m.name, online:true, lastSeen:m.ts};
-    renderPeople();
-  }
-}
+// chat
+chatChannel.onmessage = (ev)=>{ const m=ev.data; appendChat(`${m.fromName}: ${m.text}`); }
+function appendChat(t){ const d=document.createElement('div'); d.textContent=t; chatBox.appendChild(d); chatBox.scrollTop=chatBox.scrollHeight; }
 
-// remove stale people every 15s
-setInterval(()=>{
-  const now = Date.now();
-  for(const id in people){
-    if(id===myId) continue;
-    if(now - (people[id].lastSeen||0) > 15000) people[id].online=false;
-  }
-  renderPeople();
-},15000);
-
-// Chat handling
-chatChannel.onmessage = (ev)=>{
-  const m = ev.data;
-  appendChat(`${m.fromName}: ${m.text}`);
-}
-chatSend.addEventListener('click',()=>{
-  const txt = chatText.value.trim(); if(!txt) return;
-  chatChannel.postMessage({type:'chat',from:myId,fromName:myName,text:txt,ts:Date.now()});
-  appendChat(`Me: ${txt}`);
-  chatText.value='';
-});
-function appendChat(t){
-  const d = document.createElement('div'); d.textContent = t; chatBox.appendChild(d); chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-// people list rendering
-function renderPeople(){
-  peopleList.innerHTML='';
-  // sort by online first
-  const arr = Object.values(people).sort((a,b)=> (b.online?1:0)-(a.online?1:0));
-  // ensure me shown first
-  const me = {id:myId,name:myName,online:true};
-  peopleList.appendChild(renderPersonRow(me,true));
-  arr.forEach(p=>{
-    if(p.id===myId) return;
-    peopleList.appendChild(renderPersonRow(p,false));
-  });
-}
-function renderPersonRow(p,isMe){
-  const root = document.createElement('div'); root.className='friend';
-  const left = document.createElement('div');
-  left.style.display='flex';left.style.alignItems='center';left.style.gap='8px';
-  const dot = document.createElement('div'); dot.className='presence-dot ' + (p.online? 'presence-online':'presence-off');
-  const name = document.createElement('div'); name.textContent = p.name || 'Unnamed'; name.style.fontWeight='600';
-  left.appendChild(dot); left.appendChild(name);
-  const actions = document.createElement('div');
-  if(!isMe){
-    const btn = document.createElement('button'); btn.className='btn'; btn.textContent='Invite';
-    btn.onclick=()=>{ sendInvite(p.id); }
-    actions.appendChild(btn);
-  }
-  root.appendChild(left); root.appendChild(actions);
-  return root;
-}
-
-// friend add (local only)
-addFriendBtn.addEventListener('click',()=>{
-  const nm = friendNameInput.value.trim(); if(!nm) return;
-  const fakeId = 'friend-' + nm.replace(/\s+/g,'').toLowerCase() + '-' + Math.random().toString(36).slice(2,6);
-  people[fakeId] = {id:fakeId,name:nm,online:false,lastSeen:0};
-  friendNameInput.value=''; renderPeople();
-});
-
-// Invite flow
-function sendInvite(targetId){
-  matchChannel.postMessage({type:'invite',from:myId,fromName:myName,to:targetId,ts:Date.now()});
-  appendChat(`(system) You invited ${people[targetId]?.name || targetId}`);
-}
+// match channel handling
 matchChannel.onmessage = (ev)=>{
   const m = ev.data;
-  if(m.type === 'invite' && m.to === myId){
-    // auto accept for demo
-    matchChannel.postMessage({type:'inviteAccept',from:myId,fromName:myName,to:m.from,ts:Date.now()});
-    appendChat(`(system) Auto-accepted invite from ${m.fromName}`);
+  if(m.type==='available'){ people[m.id] = {...people[m.id], id:m.id, name:m.name, online:true}; renderPeople(); }
+  if(m.type==='invite' && m.to===myId){ // incoming invite
+    // accept automatically for demo
+    matchChannel.postMessage({type:'inviteAccept',from:myId,fromName:myName,to:m.from,ts:Date.now(),stake:m.stake});
+    appendLog(`Accepted invite from ${m.fromName}`);
   }
-  if(m.type === 'inviteAccept' && m.to === myId){
-    // start match
-    startMatch(m.from, m.fromName);
+  if(m.type==='inviteAccept' && m.to===myId){ startMatch(m.from, m.fromName, {mode:'online',stake:m.stake,peerSide:'b'}); }
+  if(m.type==='matchRequest' && m.to===myId){ // someone requested to match randomly
+    // accept
+    matchChannel.postMessage({type:'matchAccept',from:myId,fromName:myName,to:m.from,ts:Date.now(),stake:m.stake});
+    startMatch(m.from, m.fromName, {mode:'online',stake:m.stake,peerSide:'b'});
   }
-}
-
-// Random matchmaking: advertise availability and attempt to match within 2 minutes
-let available = false;
-btnRandom.addEventListener('click',()=>{
-  if(waitingForMatch){ waitingForMatch=false; btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent='Not matched'; return; }
-  waitingForMatch = true; btnRandom.textContent='Cancel (searching)'; matchInfo.textContent='Searching for random player...';
-  available = true;
-  // broadcast available state
-  matchChannel.postMessage({type:'available',id:myId,name:myName,ts:Date.now()});
-  const start = Date.now();
-  randomMatchTimer = setInterval(()=>{
-    // check for any available other player
-    for(const id in people){
-      if(id===myId) continue;
-      const p = people[id];
-      if(p.online){
-        // ask to match
-        matchChannel.postMessage({type:'matchRequest',from:myId,fromName:myName,to:id,ts:Date.now()});
-        // we'll wait answer
-      }
-    }
-    if(Date.now()-start > matchTimeoutMs){
-      // timeout -> fallback to AI
-      clearInterval(randomMatchTimer); waitingForMatch=false; available=false; btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent='No players found — playing vs AI';
-      startAIMatch();
-    }
-  },3000);
-});
-
-matchChannel.onmessage = (ev)=>{
-  const m = ev.data;
-  if(m.type === 'available'){
-    people[m.id] = {...people[m.id], id:m.id,name:m.name,online:true,lastSeen:m.ts}; renderPeople();
+  if(m.type==='matchAccept' && m.to===myId){ startMatch(m.from, m.fromName, {mode:'online',stake:m.stake,peerSide:'b'}); }
+  if(m.type==='move' && inGame && currentMatch && m.to===myId){ // apply incoming move
+    chess.move({from:m.move.from,to:m.move.to,promotion:'q'});
+    renderBoard(); updateTurnUI(); appendLog(`Remote moved ${m.move.from} → ${m.move.to}`);
+    checkGameEnd();
   }
-  if(m.type === 'matchRequest' && m.to === myId){
-    // quick accept if free
-    if(!matchedWith){
-      matchChannel.postMessage({type:'matchAccept',from:myId,fromName:myName,to:m.from,ts:Date.now()});
-      startMatch(m.from, m.fromName);
-    }
-  }
-  if(m.type === 'matchAccept' && m.to === myId){
-    startMatch(m.from, m.fromName);
-  }
+  if(m.type==='resign' && inGame && m.to===myId){ endGame('win','Resigned (you win)'); }
 }
 
-function startAIMatch(){
-  matchedWith = 'AI'; matchStartTime = Date.now(); matchInfo.textContent = 'Matched vs AI'; turnInfo.textContent = myName + ' (you)';
+// UI: menu navigation
+document.getElementById('startOnline').onclick = ()=>{ show('onlineScreen'); }
+document.getElementById('startOffline').onclick = ()=>{ show('offlineScreen'); }
+document.getElementById('startBonus').onclick = ()=>{ show('bonusScreen'); updateBonusInfo(); }
+document.getElementById('menuOnline').onclick = ()=>{ show('onlineScreen'); }
+document.getElementById('menuOffline').onclick = ()=>{ show('offlineScreen'); }
+document.getElementById('menuBonus').onclick = ()=>{ show('bonusScreen'); updateBonusInfo(); }
+
+function show(id){ frontScreen.style.display='none'; onlineScreen.style.display='none'; offlineScreen.style.display='none'; bonusScreen.style.display='none'; gameScreen.style.display='none'; document.getElementById(id).style.display='block'; }
+
+// online screen interactions
+let chosenStake = 5;
+document.querySelectorAll('.stake').forEach(b=>b.addEventListener('click',()=>{ chosenStake = Number(b.dataset.stake); document.getElementById('onlineInfo').textContent = 'Selected stake: '+chosenStake; }));
+
+document.getElementById('onlineFriend').onclick = ()=>{
+  // invite a friend by name selection (pick first online friend)
+  const target = Object.values(people).find(p=>p.id!==myId && p.online);
+  if(!target){ appendLog('No online friend found'); return; }
+  // deduct coins now as hold
+  if(coins < chosenStake){ appendLog('Not enough coins for stake'); return; }
+  coins -= chosenStake; saveCoins(); updateCoinDisplay();
+  matchChannel.postMessage({type:'invite',from:myId,fromName:myName,to:target.id,stake:chosenStake,ts:Date.now()});
+  appendLog('Invited '+target.name+' for stake '+chosenStake);
 }
 
-function startMatch(peerId, peerName){
-  if(matchedWith) return;
-  matchedWith = peerId; matchStartTime = Date.now(); waitingForMatch=false; available=false; clearInterval(randomMatchTimer);
-  btnRandom.textContent='Random Match (2 min)'; matchInfo.textContent = 'Matched with ' + peerName; turnInfo.textContent = myName + ' (you)';
-  appendChat(`(system) Matched with ${peerName}`);
+document.getElementById('onlineRandom').onclick = ()=>{
+  // advertise available and request match requests to online peers
+  if(coins < chosenStake){ appendLog('Not enough coins'); return; }
+  waitingForMatch = true; appendLog('Searching random players...');
+  // hold coins
+  coins -= chosenStake; saveCoins(); updateCoinDisplay();
+  matchChannel.postMessage({type:'available',id:myId,name:myName,stake:chosenStake,ts:Date.now()});
+  // ask everyone to match
+  matchChannel.postMessage({type:'matchRequest',from:myId,fromName:myName,stake:chosenStake,to:null,ts:Date.now()});
+  // 2 minute fallback
+  setTimeout(()=>{ if(waitingForMatch){ waitingForMatch=false; appendLog('No match found — starting vs AI'); startAIMatch(chosenStake); } },120000);
 }
 
-// ===== Simple board implementation (click move) =====
-const initialFEN = [
-  ['r','n','b','q','k','b','n','r'],
-  ['p','p','p','p','p','p','p','p'],
-  ['','','','','','','',''],
-  ['','','','','','','',''],
-  ['','','','','','','',''],
-  ['','','','','','','',''],
-  ['P','P','P','P','P','P','P','P'],
-  ['R','N','B','Q','K','B','N','R']
-];
-let boardState = JSON.parse(JSON.stringify(initialFEN));
-let selected = null; // {r,c}
+document.getElementById('onlineBack').onclick = ()=>{ show('frontScreen'); }
 
-function renderBoard(){
-  boardEl.innerHTML='';
-  for(let r=0;r<8;r++){
-    for(let c=0;c<8;c++){
-      const sq = document.createElement('div');
-      sq.className = 'square ' + (((r+c)%2===0)?'light':'dark');
-      sq.dataset.r = r; sq.dataset.c = c;
-      const val = boardState[r][c];
-      if(val){
-        const p = document.createElement('div'); p.className='piece'; p.textContent = pieceCharToSymbol(val); sq.appendChild(p);
-      }
-      sq.onclick = onSquareClick;
-      boardEl.appendChild(sq);
-    }
-  }
-  highlightSelected();
-}
-function pieceCharToSymbol(ch){
-  const map = {K:'♔',Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙',k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'};
-  return map[ch]||'';
-}
+// offline interactions
+document.getElementById('offlineHuman').onclick = ()=>{ startLocalHumanMatch(); }
+document.getElementById('offlineComputer').onclick = ()=>{ document.getElementById('computerOptions').style.display='block'; }
+document.getElementById('offlineBack').onclick = ()=>{ show('frontScreen'); }
 
-function onSquareClick(e){
-  const r = Number(this.dataset.r), c = Number(this.dataset.c);
-  const mode = document.getElementById('moveMode').value;
-  if(!selected){
-    if(boardState[r][c]){ selected = {r,c}; }
-  } else {
-    // move
-    const from = {...selected}, to = {r,c};
-    movePiece(from,to,true);
-    selected = null;
-  }
-  highlightSelected();
-}
-function movePiece(from,to,emit){
-  const piece = boardState[from.r][from.c];
-  boardState[to.r][to.c] = piece; boardState[from.r][from.c] = '';
-  renderBoard();
-  // emit to peer
-  if(emit && matchedWith && matchedWith!=='AI'){
-    matchChannel.postMessage({type:'move',fromId:myId,toId:matchedWith,move:{from, to, piece},ts:Date.now()});
-  }
-}
+document.querySelectorAll('.diff').forEach(b=>b.addEventListener('click',()=>{ aiDifficulty = b.dataset.diff; let reward = aiDifficulty==='easy'?4:aiDifficulty==='medium'?7:10; startAIMatch(reward); }));
 
-function highlightSelected(){
-  const squares = boardEl.querySelectorAll('.square');
-  squares.forEach(s=>s.classList.remove('highlight'));
-  if(selected){
-    const idx = selected.r*8 + selected.c;
-    const node = squares[idx]; if(node) node.classList.add('highlight');
-  }
+// bonus interactions
+document.getElementById('claimBonus').onclick = ()=>{ claimDailyBonus(); }
+document.getElementById('bonusBack').onclick = ()=>{ show('frontScreen'); }
+
+// save name
+saveNameBtn.addEventListener('click',()=>{ myName = nameInput.value.trim()||myName; localStorage.setItem('cg_name', myName); myNameEl.textContent = myName; sendPresence(); appendLog('Name saved'); });
+
+// people list & add friend
+document.getElementById('addFriendBtn').onclick = ()=>{ const nm = document.getElementById('friendNameInput').value.trim(); if(!nm) return; const fid='friend-'+Math.random().toString(36).slice(2,8); people[fid]={id:fid,name:nm,online:false}; renderPeople(); }
+
+function renderPeople(){ peopleList.innerHTML=''; // ensure me shown
+ const meRow = renderPerson({id:myId,name:myName,online:true},true); peopleList.appendChild(meRow);
+ Object.values(people).forEach(p=>{ if(p.id===myId) return; peopleList.appendChild(renderPerson(p,false)); }); }
+function renderPerson(p,isMe){ const root=document.createElement('div'); root.className='friend'; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const dot=document.createElement('div'); dot.className='presence-dot '+(p.online?'presence-online':'presence-off'); const name=document.createElement('div'); name.textContent=p.name; name.style.fontWeight='600'; left.appendChild(dot); left.appendChild(name); const right=document.createElement('div'); if(!isMe){ const btn=document.createElement('button'); btn.className='btn'; btn.textContent='Invite'; btn.onclick=()=>{ matchChannel.postMessage({type:'invite',from:myId,fromName:myName,to:p.id,stake:chosenStake,ts:Date.now()}); appendLog('Invited '+p.name); if(coins>=chosenStake){ coins-=chosenStake; saveCoins(); updateCoinDisplay(); } else appendLog('Not enough coins to hold'); }; right.appendChild(btn); } root.appendChild(left); root.appendChild(right); return root; }
+
+function appendLog(t){ const d=document.createElement('div'); d.textContent='['+new Date().toLocaleTimeString()+'] '+t; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+
+// Game engine & board
+function initChess(){ chess = new window.Chess(); boardEl.innerHTML=''; for(let r=8;r>=1;r--){ for(let c=1;c<=8;c++){ const sq = document.createElement('div'); const color = ((r+c)%2===0)?'light':'dark'; sq.className='square '+(color==='light'?'light':'dark'); const coord = fileRank(c-1,r-1); sq.dataset.coord = coord; sq.onclick = onSquareClick; boardEl.appendChild(sq); } } renderBoard(); }
+function fileRank(f,r){ const files='abcdefgh'; return files[f]+(r+1); }
+function renderBoard(){ const squares = boardEl.querySelectorAll('.square'); squares.forEach(s=>{ s.innerHTML=''; s.classList.remove('highlight'); const pos = chess.board(); // board() returns 8x8 rows from 0..7
+ }); const board = chess.board(); for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const piece = board[r][c]; const fileIdx = c; const rankIdx = 7-r; const coord = fileRank(fileIdx,rankIdx); const sq = Array.from(boardEl.querySelectorAll('.square')).find(x=>x.dataset.coord===coord);
+ if(piece){ const d=document.createElement('div'); d.className='piece'; d.textContent = pieceToSymbol(piece); sq.appendChild(d); }
+ } } updateTurnUI(); }
+function pieceToSymbol(p){ const map={'p':'♟','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚'}; return p.color==='w'?map[p.type].toUpperCase():map[p.type]; }
+
+function onSquareClick(e){ if(!inGame) return; const coord = this.dataset.coord; const turn = chess.turn(); // 'w' or 'b'
+ if(!selectedSquare){ // pick a piece of correct color
+   const piece = chess.get(coord);
+   if(!piece) return; if(piece.color!==turn) return; selectedSquare=coord; highlightSquare(coord); return; }
+ // if selected, attempt move
+ const move = chess.move({from:selectedSquare,to:coord,promotion:'q'});
+ selectedSquare = null; clearHighlights(); if(move){ renderBoard(); appendLog('You moved '+move.from+'→'+move.to); updateTurnUI(); // emit move if online peer
+   if(currentMatch && currentMatch.mode==='online' && currentMatch.peerId){ matchChannel.postMessage({type:'move',from:myId,fromName:myName,to:currentMatch.peerId,move:{from:move.from,to:move.to},ts:Date.now()}); }
+   checkGameEnd(); if(currentMatch && currentMatch.vs==='AI' && inGame){ setTimeout(()=>aiMakeMove(),800); }
+ } }
+function highlightSquare(coord){ clearHighlights(); const sq = Array.from(boardEl.querySelectorAll('.square')).find(x=>x.dataset.coord===coord); if(sq) sq.classList.add('highlight'); }
+function clearHighlights(){ boardEl.querySelectorAll('.square').forEach(s=>s.classList.remove('highlight')); }
+
+function updateTurnUI(){ turnInfo.textContent = chess.turn()==='w'? (currentMatch && currentMatch.side==='w' ? 'Your turn' : 'Opponent') : (currentMatch && currentMatch.side==='b' ? 'Your turn' : 'Opponent'); statusInfo.textContent = chess.in_check()? 'Check' : 'Playing'; }
+
+// start matches
+function startLocalHumanMatch(){ show('gameScreen'); inGame=true; initChess(); chess.reset(); renderBoard(); currentMatch={mode:'local',vs:'human',peerId:null,stake:0,side:'w'}; matchInfo.textContent='Local Human vs Human'; turnInfo.textContent='White to move'; appendLog('Local human match started'); }
+
+function startAIMatch(reward){ show('gameScreen'); inGame=true; initChess(); chess.reset(); renderBoard(); currentMatch={mode:'ai',vs:'AI',peerId:'AI',stake:reward,side:'w'}; matchInfo.textContent='Playing vs Computer ('+aiDifficulty+')'; turnInfo.textContent='White to move'; appendLog('AI match started (reward:'+reward+')'); if(chess.turn()!=='w'){ setTimeout(()=>aiMakeMove(),700); } }
+
+function startMatch(peerId, peerName, opts={mode:'online',stake:5,peerSide:'b'}){
+  show('gameScreen'); inGame=true; initChess(); chess.reset(); renderBoard(); currentMatch={mode:'online',vs:'player',peerId:peerId,stake:opts.stake||5,side:'w'}; matchInfo.textContent = 'Matched vs '+peerName+' — stake '+currentMatch.stake; appendLog('Matched with '+peerName);
+  // turn: white starts
 }
 
-// receive remote moves
-matchChannel.onmessage = (ev)=>{
-  const m = ev.data;
-  if(m.type === 'move' && m.toId === myId){
-    // apply move
-    const mv = m.move;
-    movePiece(mv.from, mv.to, false);
-    appendChat(`(game) ${m.fromName} moved ${mv.piece} from ${mv.from.r},${mv.from.c} to ${mv.to.r},${mv.to.c}`);
-  }
+// AI move simple implementations
+function aiMakeMove(){ if(!inGame) return; // choose random legal move for easy, selection heuristics for medium/hard
+ const moves = chess.moves(); if(moves.length===0) return; let mv;
+ if(aiDifficulty==='easy' || !aiDifficulty){ mv = moves[Math.floor(Math.random()*moves.length)]; }
+ else if(aiDifficulty==='medium'){ // prefer captures
+   const caps = moves.filter(m=>m.includes('x')); mv = caps.length? caps[Math.floor(Math.random()*caps.length)] : moves[Math.floor(Math.random()*moves.length)]; }
+ else { // hard: use simple material heuristic (try moves and pick best material score)
+   let best=null; let bestScore=-9999;
+   for(const m of moves){ const copy = new window.Chess(chess.fen()); copy.move(m); const score = evaluateMaterial(copy); if(score>bestScore){ bestScore=score; best=m; } }
+   mv = best || moves[Math.floor(Math.random()*moves.length)]; }
+ chess.move(mv); renderBoard(); appendLog('AI moved: '+mv); checkGameEnd(); }
+function evaluateMaterial(c){ const pieces = c.board(); let score=0; for(const row of pieces) for(const p of row) if(p) score += (p.color==='w'? 1: -1) * (p.type==='p'?1:p.type==='n'||p.type==='b'?3:p.type==='r'?5:p.type==='q'?9:0); return score; }
+
+// check end conditions
+function checkGameEnd(){ if(chess.in_checkmate()){ // determine winner
+   const winner = chess.turn()==='w' ? 'black' : 'white'; // because turn() returns side to move and checkmated side lost
+   const youAreWhite = currentMatch && currentMatch.side==='w'; let result;
+   if(currentMatch.mode==='ai'){ // if player wins (opposite of winner)
+     const playerWon = (winner==='black' && currentMatch.side==='w') || (winner==='white' && currentMatch.side==='b'); if(playerWon){ awardCoins(currentMatch.stake); endGame('win','Checkmate — You Win'); } else { endGame('lose','Checkmate — You Lose'); }
+   } else if(currentMatch.mode==='online'){ // determine if local player won or lost by color. We assume local player is white if currentMatch.side==='w'
+     const playerIsWhite = currentMatch.side==='w'; const playerWon = (winner==='white' && playerIsWhite) || (winner==='black' && !playerIsWhite); if(playerWon){ awardCoins(currentMatch.stake*2); endGame('win','Checkmate — You Win'); } else { endGame('lose','Checkmate — You Lose'); }
+   } else if(currentMatch.mode==='local'){ endGame('done','Checkmate — Match over'); }
+ }
+ else if(chess.in_stalemate() || chess.in_draw()){ endGame('draw','Draw'); }
 }
 
-resetBtn.addEventListener('click',()=>{ boardState = JSON.parse(JSON.stringify(initialFEN)); renderBoard(); appendChat('(system) Board reset'); });
+function awardCoins(n){ coins = Number(coins) + Number(n); saveCoins(); updateCoinDisplay(); appendLog('Awarded '+n+' coins'); }
+function saveCoins(){ localStorage.setItem('cg_coins', coins); coinPanel.textContent = coins; coinDisplay.textContent = coins; document.getElementById('myCoinsInGame').textContent = coins; }
+function updateCoinDisplay(){ coinDisplay.textContent = coins; coinPanel.textContent = coins; document.getElementById('myCoinsInGame').textContent = coins; }
 
-// auto-accept and presence on unload
-window.addEventListener('beforeunload',()=>{
-  presenceChannel.postMessage({type:'leave',id:myId,ts:Date.now()});
-});
-
-// Save name
-saveNameBtn.addEventListener('click',()=>{ myName = nameInput.value.trim() || myName; localStorage.setItem('cg_name', myName); myNameEl.textContent = myName; sendPresence(); });
-
-// simple chat append initial
-appendChat('(system) Welcome ' + myName + ' — open another tab to simulate other players.');
-renderBoard(); renderPeople();
-
-// Helper: AI move (random)
-function startAIMatch(){
-  matchedWith = 'AI'; matchStartTime = Date.now(); matchInfo.textContent = 'Matched vs AI'; turnInfo.textContent = myName + ' (you)';
-  appendChat('(system) Starting AI match (random moves)');
-  // AI will move randomly every 3 seconds
-  const aiInterval = setInterval(()=>{
-    if(matchedWith !== 'AI'){ clearInterval(aiInterval); return; }
-    // pick random non-empty piece for AI (black side)
-    let from=null, to=null;
-    const candidates = [];
-    for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(boardState[r][c] && boardState[r][c] === boardState[r][c].toLowerCase()) candidates.push({r,c});
-    if(candidates.length===0) { clearInterval(aiInterval); appendChat('(system) AI has no pieces.'); return; }
-    from = candidates[Math.floor(Math.random()*candidates.length)];
-    // random dest
-    to = {r: Math.floor(Math.random()*8), c: Math.floor(Math.random()*8)};
-    movePiece(from,to,true);
-    appendChat('(game) AI moved');
-  },3000);
+// end game
+function endGame(status, message){ inGame=false; statusInfo.textContent = message; appendLog('Game ended: '+message); // if online and losing, do not refund stake
+ if(currentMatch && currentMatch.mode==='online'){ // notify peer of result if needed
+   // send resign or end signal
+ }
 }
 
-// Expose hooks for integrating a proper chess engine
-window.CG = {
-  sendMoveToPeer: (move)=>{ if(matchedWith && matchedWith!=='AI') matchChannel.postMessage({type:'move',fromId:myId,toId:matchedWith,fromName:myName,move,ts:Date.now()}); },
-  onRemoteMove: (fn)=>{ /* placeholder: use matchChannel.onmessage to capture move events */ }
-};
+// resign
+document.getElementById('resignBtn').onclick = ()=>{ if(!inGame) return; if(currentMatch.mode==='online' && currentMatch.peerId){ matchChannel.postMessage({type:'resign',from:myId,fromName:myName,to:currentMatch.peerId,ts:Date.now()}); endGame('lose','You resigned'); } else { endGame('lose','You resigned'); } }
+
+// rematch & leave
+document.getElementById('rematchBtn').onclick = ()=>{ if(currentMatch && currentMatch.mode==='online' && currentMatch.peerId){ matchChannel.postMessage({type:'rematchRequest',from:myId,fromName:myName,to:currentMatch.peerId,ts:Date.now()}); appendLog('Rematch requested'); } }
+document.getElementById('leaveBtn').onclick = ()=>{ inGame=false; currentMatch=null; show('frontScreen'); appendLog('Left match'); }
+
+// chat send
+document.getElementById('chatSend').onclick = ()=>{ const t=document.getElementById('chatText').value.trim(); if(!t) return; chatChannel.postMessage({type:'chat',from:myId,fromName:myName,text:t,ts:Date.now()}); appendChat('Me: '+t); document.getElementById('chatText').value=''; }
+
+// daily bonus
+function claimDailyBonus(){ const key='cg_bonus'; const data = JSON.parse(localStorage.getItem(key)||'{}'); const today = new Date().toISOString().slice(0,10); if(data.last === today){ appendLog('Bonus already claimed today'); return; } let streak = data.streak || 0; streak = (data.last === new Date(Date.now()-86400000).toISOString().slice(0,10)) ? streak+1 : 1; const reward = 5 * streak; coins += reward; saveCoins(); localStorage.setItem(key, JSON.stringify({last:today,streak})); appendLog('Daily bonus claimed: '+reward+' coins (streak '+streak+')'); updateBonusInfo(); }
+function updateBonusInfo(){ const key='cg_bonus'; const data = JSON.parse(localStorage.getItem(key)||'{}'); const last = data.last || 'never'; const streak = data.streak || 0; document.getElementById('bonusInfo').textContent = 'Last: '+last+' | Streak: '+streak; }
+
+// helper: start AI if random match times out
+function startAIMatch(stake){ aiDifficulty = aiDifficulty || 'easy'; appendLog('Starting fallback AI match (stake:'+stake+')'); // if stake was held, allow player to win stake*2 on win
+ startAIMatchInternal(stake); }
+function startAIMatchInternal(stake){ // reuse startAIMatch by setting aiDifficulty
+ currentMatch = {mode:'ai',vs:'AI',peerId:'AI',stake:stake,side:'w'}; show('gameScreen'); inGame=true; initChess(); chess.reset(); renderBoard(); appendLog('AI fallback match started with stake '+stake); }
+
+// utility
+function appendSystem(t){ appendLog('(system) '+t); }
+
+// initial setup
+initChess(); updateBonusInfo();
 
 /*
-  ---------------------- Server notes (Socket.IO) ----------------------
-  To make this work across devices, replace BroadcastChannel logic with a websocket server.
-  Example (client-side) using socket.io:
-
-  const socket = io('https://your-server.example');
-  socket.emit('presence', {id:myId, name:myName});
-  socket.on('matchRequest', (data)=>{ /* handle */ });
-  socket.on('move', (data)=>{ applyMoveFromServer(data); });
-
-  Server will maintain presence, match players, and relay 'move' and 'chat' events.
-
-  ---------------------------------------------------------------
+Server notes: To enable cross-device matches replace BroadcastChannel with a socket server.
+Client example:
+  const socket = io('https://yourserver');
+  socket.emit('presence',{id:myId,name:myName});
+  socket.on('matchRequest',(data)=>{ ... });
+  socket.on('move',(data)=>{ apply move });
+Server should hold coins temporarily until match ends and apply transfers.
 */
 </script>
+</body>
+</html>
 </body>
 </html>
